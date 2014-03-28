@@ -154,5 +154,12 @@ public class SpMMTypes {
 			}
 			return 0;
 		}
+
+		public void set(int value) {
+			index1 = -1;
+			index2 = -1;
+			v = value;
+			
+		}
 	}
 }

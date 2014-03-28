@@ -128,10 +128,10 @@ public class SpMMDriver {
 	    job.setInputFormatClass(SequenceFileInputFormat.class);
 	    job.setOutputFormatClass(SequenceFileOutputFormat.class);
 	    job.setMapperClass(Mapper.class);
-	    job.setCombinerClass(IntSumReducer.class);
-	    job.setReducerClass(IntSumReducer.class);
-	    job.setOutputKeyClass(IndexPair.class);
-	    job.setOutputValueClass(IntWritable.class);
+	    //job.setCombinerClass(IntSumReducer.class);
+	    job.setReducerClass(SpMMReducer.class);
+	    job.setOutputKeyClass(Key.class);
+	    job.setOutputValueClass(Value.class);
 	    for(int i = 0; i < k; i++)
 	    	FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.tempDirPath")+i));
 	    FileOutputFormat.setOutputPath(job, new Path(conf.get("SpMM.outputDirPath")));
@@ -178,8 +178,8 @@ public class SpMMDriver {
 	    job.setPartitionerClass(SpMMPatitioner.class);
 	    job.setMapOutputKeyClass(Key.class);
 	    job.setMapOutputValueClass(Value.class);
-	    job.setOutputKeyClass(IndexPair.class);
-	    job.setOutputValueClass(IntWritable.class);
+	    job.setOutputKeyClass(Key.class);
+	    job.setOutputValueClass(Value.class);
 	    FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.inputPathA")));
 	    FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.inputPathB")));
 	    FileOutputFormat.setOutputPath(job, (new Path(conf.get("SpMM.tempDirPath") + k)));

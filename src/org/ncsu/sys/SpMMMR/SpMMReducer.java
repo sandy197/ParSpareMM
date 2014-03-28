@@ -16,11 +16,11 @@ import org.ncsu.sys.SpMMMR.SpMMTypes.IndexPair;
 import org.ncsu.sys.SpMMMR.SpMMTypes.Key;
 import org.ncsu.sys.SpMMMR.SpMMTypes.Value;
 
-public class SpMMReducer extends Reducer<Key, Value, IndexPair, IntWritable> {
+public class SpMMReducer extends Reducer<Key, Value, Key, Value> {
 	
 	private SpDCSC A, B;
-	private IndexPair indexPair;
-	private IntWritable el = new IntWritable();
+	private Key indexPair;
+	private Value el = new Value();
 	
 	private static final boolean DEBUG = false;
 
@@ -53,11 +53,22 @@ public class SpMMReducer extends Reducer<Key, Value, IndexPair, IntWritable> {
 	
 	private int sib, skb, sjb;
 
-	public void reduce(SpMMTypes.Key key, Iterable<SpMMTypes.Value> values, Context context)
+	public void reduce(SpMMTypes.Key key, Iterable<SpMMTypes.Value> values, Context context)	
 			throws IOException, InterruptedException {
 		
 		 if (DEBUG) printReduceInputKey(key);
 	      int ib, kb, jb, nz1, nz2;
+	      int sum = 0;
+	      //job 2 reduce function
+	      if(key.index2 < 0){
+	    	  //sum up all the values and write
+	    	  for(Value val : values){
+	    		  sum += val.v;
+	    	  }
+	    	  el.set(sum);
+	    	  context.write(key, el);
+	    	  return;
+	      }
 	      
           ib = key.index1;
           kb = key.index2;
@@ -65,11 +76,11 @@ public class SpMMReducer extends Reducer<Key, Value, IndexPair, IntWritable> {
           if (key.m == 0) {
             sib = ib;
             skb = kb;
-            A = build(values, IB, KB);
+            A = build(values, IB, KB, context);
           } else {
             //if (ib != sib || kb != skb) return;
             //bColDim = getDim(jb, lastJBlockNum, JB, lastJBlockSize);
-            B = build(values, KB, JB);
+            B = build(values, KB, JB, context);
             //multiply & emit
             // TODO : support building normal matrix as well.
             multiplyAndEmit(context, ib, jb);
@@ -81,8 +92,10 @@ public class SpMMReducer extends Reducer<Key, Value, IndexPair, IntWritable> {
 		List<StackEntry> multStack = A.SpMatMultiply(B);
 		for(StackEntry se : multStack){
 			if(se.value != 0){
-				indexPair = new IndexPair(ib2*IB + se.key.first, 
-											jb2*JB + se.key.second);
+				indexPair = new Key();
+				indexPair.index1 = ib2*IB + se.key.first;
+				indexPair.index2 = -1;
+				indexPair.index3 = jb2*JB + se.key.second;
 				el.set(se.value);
 				try {
 					context.write(indexPair, el);
@@ -98,10 +111,10 @@ public class SpMMReducer extends Reducer<Key, Value, IndexPair, IntWritable> {
 	}
 
 	private SpDCSC build(Iterable<Value> values, int m, int n, Context context) {
-		if(useTaskPool){
-			return context.getMatrix();
-		}
-		else
+//		if(useTaskPool){
+//			return context.getMatrix();
+//		}
+//		else
 			return new SpDCSC(values, m, n);
 	}
 
