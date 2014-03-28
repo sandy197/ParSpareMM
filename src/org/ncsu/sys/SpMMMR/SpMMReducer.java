@@ -7,6 +7,7 @@ import org.apache.commons.collections.ResettableIterator;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.ipc.GenericMatrix;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.join.ResetableIterator;
@@ -18,13 +19,14 @@ import org.ncsu.sys.SpMMMR.SpMMTypes.Value;
 
 public class SpMMReducer extends Reducer<Key, Value, Key, Value> {
 	
-	private SpDCSC A, B;
+	private GenericMatrix<?> A, B;
 	private Key indexPair;
 	private Value el = new Value();
 	
 	private static final boolean DEBUG = false;
 
 	private boolean useTaskPool;
+	private boolean isSparseMM;
 	private String inputPathA;
 	private String inputPathB;
 	private String outputDirPath;
@@ -80,43 +82,123 @@ public class SpMMReducer extends Reducer<Key, Value, Key, Value> {
           } else {
             //if (ib != sib || kb != skb) return;
             //bColDim = getDim(jb, lastJBlockNum, JB, lastJBlockSize);
-            B = build(values, KB, JB, context);
+            B = buildOrGet(values, KB, JB, context);
             //multiply & emit
-            // TODO : support building normal matrix as well.
+            //support building normal matrix as well.
             multiplyAndEmit(context, ib, jb);
           }
 	}
-	
+
 	private void multiplyAndEmit(Context context, int ib2,
 			int jb2) {
-		List<StackEntry> multStack = A.SpMatMultiply(B);
-		for(StackEntry se : multStack){
-			if(se.value != 0){
-				indexPair = new Key();
-				indexPair.index1 = ib2*IB + se.key.first;
-				indexPair.index2 = -1;
-				indexPair.index3 = jb2*JB + se.key.second;
-				el.set(se.value);
-				try {
-					context.write(indexPair, el);
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
+		if(isSparseMM){
+			SpDCSC a, b;
+			a = (SpDCSC) A.getMatrix();
+			b = (SpDCSC) B.getMatrix();
+			List<StackEntry> multStack = a.SpMatMultiply(b);
+			for(StackEntry se : multStack){
+				if(se.value != 0){
+					indexPair = new Key();
+					indexPair.index1 = ib2*IB + se.key.first;
+					indexPair.index2 = -1;
+					indexPair.index3 = jb2*JB + se.key.second;
+					el.set(se.value);
+					try {
+						context.write(indexPair, el);
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			}
+		}
+		else{
+			//regular matrix multiply
+			int[][] a,b;
+			a = (int[][]) A.getMatrix();
+			b = (int[][]) B.getMatrix();
+			int ibase = ib2*IB;
+			int jbase = jb2*JB;
+			long multiplyTime = 0;
+			long writingTime = 0;
+			for (int i = 0; i < IB; i++) {
+				for (int j = 0; j < JB; j++) {
+					int sum = 0;
+					long start_m = System.nanoTime();
+					//increasing the number of iterations to check 
+					//for a 5X increase in multiplication time
+					for (int i_jff = 0; i_jff < 1000; i_jff++){
+					for (int k = 0; k < KB; k++) {
+						//srkandul
+						if(a[i][k] != 0 && b[k][j] != 0){
+							sum += b[i][k] * b[k][j];
+						}
+					}
+					}
+					long end_m = System.nanoTime();
+					multiplyTime += end_m - start_m;
+					long start = System.nanoTime();
+					if (sum != 0) {
+						indexPair.index1 = ibase + i;
+						indexPair.index2 = -1;
+						indexPair.index3 = jbase + j;
+						el.set(sum);
+						try {
+							context.write(indexPair, el);
+						} catch (IOException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+					}
+					long end = System.nanoTime();
+					writingTime += end - start;
 				}
 			}
 		}
 	}
-
-	private SpDCSC build(Iterable<Value> values, int m, int n, Context context) {
-//		if(useTaskPool){
-//			return context.getMatrix();
-//		}
-//		else
-			return new SpDCSC(values, m, n);
+	
+	private GenericMatrix<?> buildOrGet(Iterable<Value> values, int kB2,
+			int jB2, Context context) {
+		if(useTaskPool){
+			return context.getMatrix();
+		}
+		else{
+			GenericMatrix<?> genMatrix = build(values, kB2, jB2, context);
+			context.setMatrix(genMatrix);
+			return genMatrix;
+		}
 	}
+
+	private GenericMatrix<?> build(Iterable<Value> values, int m, int n, Context context) {
+		if(isSparseMM)
+			return new SpMMMatrix(new SpDCSC(values, m, n));
+		else
+			return new RegMatrix(build_orig(m, n, values));
+	}
+	
+	private int[][] build_orig(int rowDim, int colDim,
+            Iterable<Value> valueList)
+    {
+		int[][] matrix = new int[rowDim][colDim];
+		int nonZeros = 0;
+		for (int rowIndex = 0; rowIndex < rowDim; rowIndex++)
+			for (int colIndex = 0; colIndex < colDim; colIndex++)
+				matrix[rowIndex][colIndex] = 0;
+		for (Value value : valueList) {
+			if (DEBUG) printReduceInputValue(value);
+			matrix[value.index1][value.index2] = value.v;
+			if(value.v != 0){
+				nonZeros++;
+			}
+		}
+		return matrix;
+    }
 
 	public void setup (Context context) {
 		init(context);
@@ -140,6 +222,7 @@ public class SpMMReducer extends Reducer<Key, Value, Key, Value> {
 	private void init(JobContext context) {
 		Configuration conf = context.getConfiguration();
 		useTaskPool = conf.getBoolean("SpMM.useTaskPool", false);
+		isSparseMM = conf.getBoolean("SpMM.isSparseMM", false);
 		inputPathA = conf.get("SpMM.inputPathA");
 		inputPathB = conf.get("SpMM.inputPathB");
 		outputDirPath = conf.get("SpMM.outputDirPath");

@@ -84,6 +84,10 @@ public class SpMMDriver {
 	    tempDirPath = SPMM_TEMP_DIR_PATH + "/SpMM-" +
 	          Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
 
+	    //TODO:take these as command line param
+	    conf.setBoolean("SpMM.useTaskPool", true);
+	    conf.setBoolean("SpMM.isSparseMM", true);
+	    
 	    conf.set("SpMM.inputPathA", inputPathA);
 	    conf.set("SpMM.inputPathB", inputPathB);
 	    conf.set("SpMM.outputDirPath", outPath);
@@ -102,7 +106,7 @@ public class SpMMDriver {
 		
 	    for(int k = 0; k < aColsbRows/aColbRowBlk; k++){
 	    	conf.setInt("SpMM.iteration", k);
-	    	bCastJob(conf, k);
+	    	bCastJob(conf, k, k < 1);
 		}
 	    //TODO:implement this
 	    aggregateJob(conf, aColsbRows/aColbRowBlk);
@@ -160,7 +164,7 @@ public class SpMMDriver {
 	 * @param k
 	 * @throws Exception 
 	 */
-	private void bCastJob(Configuration config, int k) throws Exception {
+	private void bCastJob(Configuration config, int k, boolean isFirstIter) throws Exception {
 		//TODO:Form keys and read only those pertaining to the block. 
 		//Make use of the sorting order.
 		config.setInt("SpMM.iteration", k);
@@ -181,7 +185,8 @@ public class SpMMDriver {
 	    job.setOutputKeyClass(Key.class);
 	    job.setOutputValueClass(Value.class);
 	    FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.inputPathA")));
-	    FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.inputPathB")));
+	    if(isFirstIter)
+	    	FileInputFormat.addInputPath(job, new Path(conf.get("SpMM.inputPathB")));
 	    FileOutputFormat.setOutputPath(job, (new Path(conf.get("SpMM.tempDirPath") + k)));
 	    
 	    boolean ok = job.waitForCompletion(true);
